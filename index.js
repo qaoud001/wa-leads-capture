@@ -1,40 +1,50 @@
 const { makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
-const fetch = require('node-fetch');
-const qrcode = require('qrcode-terminal');
+const QRCode = require('qrcode');
+const express = require('express');
+const https = require('https');
 
+const app = express();
+const PORT = process.env.PORT || 3000;
 const SHEET_URL = process.env.SHEET_URL;
 const seenNumbers = new Set();
+let lastQR = null;
 
-async function sendToSheet(phone, datetime) {
-  try {
-    await fetch(SHEET_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone, datetime })
-    });
-    console.log('✅ تم حفظ الرقم:', phone);
-  } catch (err) {
-    console.error('❌ خطأ في الشيت:', err.message);
+app.get('/', async (req, res) => {
+  if (!lastQR) {
+    return res.send('<h2>جاري الاتصال... انتظر ثم اعد تحميل الصفحة</h2>');
   }
+  const qrImage = await QRCode.toDataURL(lastQR);
+  res.send(`<html><body style="text-align:center"><h2>امسح الـ QR بواتساب بيزنس</h2><img src="${qrImage}"/></body></html>`);
+});
+
+app.listen(PORT, () => console.log('✅ Server running on port', PORT));
+
+function sendToSheet(phone, datetime) {
+  const data = JSON.stringify({ phone, datetime });
+  const url = new URL(SHEET_URL);
+  const options = {
+    hostname: url.hostname,
+    path: url.pathname + url.search,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': data.length }
+  };
+  const req = https.request(options);
+  req.on('error', (e) => console.error('❌ Sheet error:', e.message));
+  req.write(data);
+  req.end();
+  console.log('✅ تم حفظ الرقم:', phone);
 }
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('auth');
-
-  const sock = makeWASocket({
-    auth: state,
-    logger: pino({ level: 'silent' })
-  });
+  const sock = makeWASocket({ auth: state, logger: pino({ level: 'silent' }) });
 
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
-    if (qr) {
-      console.log('📱 امسح الـ QR عشان تربط الواتساب:');
-      qrcode.generate(qr, { small: true });
-    }
-    if (connection === 'open') console.log('✅ واتساب متصل');
+    if (qr) { lastQR = qr; console.log('📱 QR جاهز — افتح الرابط'); }
+    if (connection === 'open') { lastQR = null; console.log('✅ واتساب متصل!'); }
     if (connection === 'close') {
       const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
       if (shouldReconnect) startBot();
@@ -51,7 +61,7 @@ async function startBot() {
       if (seenNumbers.has(phone)) continue;
       seenNumbers.add(phone);
       const datetime = new Date().toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' });
-      await sendToSheet(phone, datetime);
+      sendToSheet(phone, datetime);
     }
   });
 }
