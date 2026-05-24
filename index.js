@@ -1,6 +1,7 @@
 const { makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const fetch = require('node-fetch');
+const qrcode = require('qrcode-terminal');
 
 const SHEET_URL = process.env.SHEET_URL;
 const seenNumbers = new Set();
@@ -23,13 +24,16 @@ async function startBot() {
 
   const sock = makeWASocket({
     auth: state,
-    logger: pino({ level: 'silent' }),
-    printQRInTerminal: true
+    logger: pino({ level: 'silent' })
   });
 
   sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('connection.update', ({ connection, lastDisconnect }) => {
+  sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
+    if (qr) {
+      console.log('📱 امسح الـ QR عشان تربط الواتساب:');
+      qrcode.generate(qr, { small: true });
+    }
     if (connection === 'open') console.log('✅ واتساب متصل');
     if (connection === 'close') {
       const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
