@@ -37,33 +37,40 @@ function sendToSheet(phone, datetime) {
 }
 
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState('auth');
-  const sock = makeWASocket({ auth: state, logger: pino({ level: 'silent' }) });
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState('auth');
+    const sock = makeWASocket({ auth: state, logger: pino({ level: 'warn' }) });
 
-  sock.ev.on('creds.update', saveCreds);
+    sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
-    if (qr) { lastQR = qr; console.log('📱 QR جاهز — افتح الرابط'); }
-    if (connection === 'open') { lastQR = null; console.log('✅ واتساب متصل!'); }
-    if (connection === 'close') {
-      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      if (shouldReconnect) startBot();
-    }
-  });
+    sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
+      if (qr) { lastQR = qr; console.log('📱 QR جاهز — افتح الرابط'); }
+      if (connection === 'open') { lastQR = null; console.log('✅ واتساب متصل!'); }
+      if (connection === 'close') {
+        console.log('🔴 Connection closed:', lastDisconnect?.error?.message);
+        const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+        if (shouldReconnect) startBot();
+      }
+    });
 
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
-    for (const msg of messages) {
-      if (msg.key.fromMe) continue;
-      const jid = msg.key.remoteJid;
-      if (!jid || jid.endsWith('@g.us')) continue;
-      const phone = jid.replace('@s.whatsapp.net', '');
-      if (seenNumbers.has(phone)) continue;
-      seenNumbers.add(phone);
-      const datetime = new Date().toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' });
-      sendToSheet(phone, datetime);
-    }
-  });
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+      if (type !== 'notify') return;
+      for (const msg of messages) {
+        if (msg.key.fromMe) continue;
+        const jid = msg.key.remoteJid;
+        if (!jid || jid.endsWith('@g.us')) continue;
+        const phone = jid.replace('@s.whatsapp.net', '');
+        if (seenNumbers.has(phone)) continue;
+        seenNumbers.add(phone);
+        const datetime = new Date().toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' });
+        sendToSheet(phone, datetime);
+      }
+    });
+
+  } catch (err) {
+    console.error('❌ Bot error:', err.message);
+    setTimeout(startBot, 5000);
+  }
 }
 
 startBot();
